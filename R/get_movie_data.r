@@ -159,3 +159,27 @@ temp <- tibble(order = sample(ranked_cast$avg_billing,10)) %>%
   mutate(wgt_order = log(pct*10))
 plot(temp$order,temp$wgt_order)
 
+# CREW
+pre_code_crew <- pre_code_credits %>%
+  unnest(cols = "crew") %>%
+  select(-cast,-known_for_department) %>%
+  mutate(person_id = as_factor(person_id)) %>%
+  mutate(movie_id = as_factor(movie_id)) %>%
+  rename(person_popularity = popularity) %>%
+  mutate(gender = as.character(gender)) %>%
+  mutate(gender = fct_recode(gender,F= '1',M = '2',U = '0',T = "3")) %>%
+  # guess unknown genders
+  mutate(first = word(name)) %>%
+  left_join(genders_1905,by="first") %>%
+  mutate(gender = if_else(gender.x == "U" & !is.na(gender.y),
+                          gender.y,gender.x),
+         .before = "gender.x") %>%
+  select(-gender.x,-gender.y,-first) %>%
+  # limit to English-language films
+  inner_join(pre_code_movies) %>%
+  {.}
+
+directors <- pre_code_crew %>%
+  filter(job == "Director") %>%
+  count(name) %>%
+  arrange(desc(n))
