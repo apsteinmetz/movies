@@ -1,6 +1,9 @@
 # get pre-code actors and movies
 library(tidyverse)
 library(TMDb)
+library(extrafont)
+library(ggimage)
+library(magick)
 
 # proprietary to my system
 api_key <- Sys.getenv("TMDB_V3_API_KEY")
@@ -107,10 +110,10 @@ pre_code_movies <- pre_code_movies_raw %>%
   ) %>%
   rename(movie_id = id) %>%
   mutate(movie_id = as_factor(movie_id)) %>%
-  mutate(release_year = as.numeric(release_year)) %>%
-  mutate(release_date = as.Date(release_date)) %>%
   mutate(original_language =as.factor(original_language)) %>%
-  filter(original_language == "en")
+  filter(original_language == "en") %>%
+  mutate(release_year = as.numeric(release_year)) %>%
+  mutate(release_date = as.Date(release_date))
 
 
 pre_code_cast <- pre_code_credits %>%
@@ -131,33 +134,28 @@ pre_code_cast <- pre_code_credits %>%
   # limit to actors in English-language films
   inner_join(pre_code_movies)
 
+# scale billing order to count
+# appearance of top-billed actor
+# more than a supporting actor
+wgt_order <- tibble(order = 0:100,
+                    billing_factor  = c(1,1,1,0.5,0.5,0.25,0.25,rep(0.1,94)))
 
 ranked_cast <- pre_code_cast %>%
-#  inner_join(pre_code_movies) %>%
+  #  inner_join(pre_code_movies) %>%
+  left_join(wgt_order, by = "order") %>%
   group_by(person_id) %>%
-  mutate(avg_billing = mean(order)) %>%
-  summarise(appearances = n(),name,gender,person_popularity,avg_billing) %>%
-  unique() %>%
-  arrange(desc(appearances)) %>%
+ summarise(
+   name,
+   gender,
+   appearances = n(),
+   person_popularity = mean(person_popularity),
+   avg_billing = mean(order),
+   avg_billing_factor = mean(billing_factor)
+ ) %>%
+ unique() %>%
+  mutate(bankability = appearances * avg_billing_factor,.before = "avg_billing") %>%
+ arrange(desc(appearances)) %>%
   {.}
-
-ranked_cast$bankability <- (10*(1-percent_rank(ranked_cast$avg_billing))) *
-  ranked_cast$appearances
-
-temp <- ranked_cast %>% filter(bankability > 25)
-
-
-actor <- "Louise Brooks"
-temp <- pre_code_cast %>%
-  filter(name == actor) %>%
-  left_join(pre_code_movies) %>%
-  arrange(release_date)
-
-temp <- tibble(order = sample(ranked_cast$avg_billing,10)) %>%
-  arrange(order) %>%
-  mutate(pct = 1-percent_rank(order)) %>%
-  mutate(wgt_order = log(pct*10))
-plot(temp$order,temp$wgt_order)
 
 # CREW
 pre_code_crew <- pre_code_credits %>%
@@ -183,3 +181,97 @@ directors <- pre_code_crew %>%
   filter(job == "Director") %>%
   count(name) %>%
   arrange(desc(n))
+
+# --------------------------------------------------
+# PLOTS
+text_color = "gold"
+
+
+# top appearances
+p <- ranked_cast %>%
+  ungroup() %>%
+  filter(gender == "M") %>%
+  slice_max(order_by = appearances, n=20) %>%
+  mutate(name = fct_rev(as_factor(name))) %>%
+  ggplot(aes(name,appearances)) + geom_col(fill = "gold") +
+  coord_flip() +
+  labs(title = '"Hardest Working" Pre-Code Actors',
+       y = "Number of Roles (1929-1934)",
+       x = "",
+       caption = "Source: TMDB.com") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm"))
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+p <- pre_code_crew %>%
+  filter(job == "Producer") %>%
+  count(name) %>%
+  ungroup() %>%
+  slice_max(order_by = n, n=20) %>%
+  mutate(name = fct_rev(as_factor(name))) %>%
+  ggplot(aes(name,n)) + geom_col(fill = "gold") +
+  coord_flip() +
+  labs(title = "Most Prolific Pre-Code Producers",
+       y = "Number of Films (1929-1934)",
+       x = "",
+       caption = "Source: TMDB.com") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm"))
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+#bankability
+p <- ranked_cast %>%
+  ungroup() %>%
+  filter(gender == "F") %>%
+  slice_max(order_by = bankability, n=20) %>%
+  mutate(name = fct_rev(as_factor(name))) %>%
+  ggplot(aes(name,bankability)) + geom_col(fill = "gold") +
+  coord_flip() +
+  labs(title = 'Most "Bankable" Pre-Code Actresses',
+       y = "Appearances and Billing (1929-1934)",
+       x = "",
+       caption = "Source: TMDB.com") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm"))
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+p <- ranked_cast %>%
+  #  filter(bankability > 20,person_popularity > 2) %>%
+  ggplot(aes(person_popularity,bankability)) + geom_point(color = text_color) +
+  geom_text(aes(label=ifelse(bankability>55,name,'')),hjust=-.1,vjust=0,color = text_color) +
+  geom_text(aes(label=ifelse(person_popularity>16,name,'')),hjust=.7,vjust=-0.6,color = text_color) +
+  labs(title = 'Popularity Today vs. "Bankability" Then',
+       y = "Bankability (Appearances and Billing)",
+       x = "Relative Hits at TMDB",
+       caption = "Source: TMDB.com, Art Steinmetz") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm"))
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+
+
+#validation
+roach_tmdb <- pre_code_crew %>%
+  filter(job == "Producer") %>%
+  filter(name == "Hal Roach") %>%
+  select(name,release_year,release_date,title)
+
+temp <- full_join(imdb_roach,roach_tmdb,by="title")
+
+
