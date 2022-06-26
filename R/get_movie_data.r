@@ -16,7 +16,6 @@ genres <- genres_movie_list(api_key)$genres %>%
 # --------------------------------------------------
 # Get all movies for a year
 pre_code_years <- as.character(1929:1934)
-test_year = "1930"
 
 # get first page and find out how many pages
 get_page_count <- function(year){
@@ -26,6 +25,7 @@ get_page_count <- function(year){
 }
 
 get_movie_page_for_year <- function(page_num,year){
+  print(paste(year,page_num))
   movie_page <- discover_movie(api_key = api_key,
                                primary_release_year = year,
                                page=page_num)$result %>%
@@ -49,6 +49,18 @@ pre_code_movies_raw <- pre_code_years %>%
 save(pre_code_movies_raw,file="data/pre_code_movies_raw.rdata")
 # can't save nested genre lists
 #write_csv(pre_code_movies_raw,file="data/pre_code_movies_raw.csv")
+
+# get supplemental data including revenue, budget, running time
+# and imdb_id
+movie2 <- function(movie_id){
+  # needs error checking
+  print(movie_id)
+  return(movie(api_key,movie_id))
+}
+
+pre_code_movies_sup_raw <- pre_code_movies_raw$id %>%
+  map(movie2)
+save(pre_code_movies_sup_raw,file = "data/pre_code_movies_sup_raw.rdata")
 
 
 # --------------------------------------------------
@@ -94,6 +106,7 @@ levels(genders_1905$gender) <- c("F","M","U","T")
 
 load(file="data/pre_code_credits.rdata")
 load(file="data/pre_code_movies_raw.rdata")
+load(file="data/pre_code_movies_sup_raw.rdata")
 
 pre_code_movies <- pre_code_movies_raw %>%
   select(release_year,
@@ -114,6 +127,24 @@ pre_code_movies <- pre_code_movies_raw %>%
   filter(original_language == "en") %>%
   mutate(release_year = as.numeric(release_year)) %>%
   mutate(release_date = as.Date(release_date))
+
+# add supplemental data
+
+pre_code_movies_sup <- lapply(pre_code_movies_sup_raw,function(x){
+  data.frame(movie_id = x[['id']],
+             budget = x[['budget']],
+             revenue =x[['revenue']],
+             imdb_id = ifelse(is.null(x[['imdb_id']]),NA,x[['imdb_id']]),
+             runtime =x[['runtime']])
+}) %>%
+  bind_rows() %>%
+  mutate(movie_id = as.factor(movie_id))
+
+pre_code_movies <- pre_code_movies %>%
+  left_join(pre_code_movies_sup,by="movie_id")
+
+
+
 
 
 pre_code_cast <- pre_code_credits %>%
@@ -181,6 +212,7 @@ directors <- pre_code_crew %>%
   filter(job == "Director") %>%
   count(name) %>%
   arrange(desc(n))
+
 
 # --------------------------------------------------
 # PLOTS
@@ -263,15 +295,5 @@ p <- ranked_cast %>%
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm"))
 ggimage::ggbackground(p, "img/deco background.jpg")
-
-
-
-#validation
-roach_tmdb <- pre_code_crew %>%
-  filter(job == "Producer") %>%
-  filter(name == "Hal Roach") %>%
-  select(name,release_year,release_date,title)
-
-temp <- full_join(imdb_roach,roach_tmdb,by="title")
 
 
