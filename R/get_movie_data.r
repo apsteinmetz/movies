@@ -12,6 +12,7 @@ genres <- genres_movie_list(api_key)$genres %>%
   as_tibble() %>%
   mutate(across(.fns = as.factor)) %>%
   rename(genre_id = id)
+min_runtime = 59
 
 # --------------------------------------------------
 # Get all movies for a year
@@ -90,7 +91,7 @@ get_credits <- function(movie_id) {
 }
 
 
-pre_code_credits <- pre_code_movies_raw$id %>%
+pre_code_credits <- as.character(pre_code_movies$movie_id) %>%
   map(get_credits) %>%
   bind_rows()
 
@@ -163,7 +164,8 @@ pre_code_cast <- pre_code_credits %>%
          .before = "gender.x") %>%
   select(-gender.x,-gender.y,-first) %>%
   # limit to actors in English-language films
-  inner_join(pre_code_movies)
+  inner_join(pre_code_movies) %>%
+  filter(runtime > min_runtime)
 
 # scale billing order to count
 # appearance of top-billed actor
@@ -206,6 +208,7 @@ pre_code_crew <- pre_code_credits %>%
   select(-gender.x,-gender.y,-first) %>%
   # limit to English-language films
   inner_join(pre_code_movies) %>%
+  filter(runtime > min_runtime) %>%
   {.}
 
 directors <- pre_code_crew %>%
@@ -222,18 +225,18 @@ text_color = "gold"
 # top appearances
 p <- ranked_cast %>%
   ungroup() %>%
-  filter(gender == "M") %>%
+  filter(gender == "F") %>%
   slice_max(order_by = appearances, n=20) %>%
   mutate(name = fct_rev(as_factor(name))) %>%
   ggplot(aes(name,appearances)) + geom_col(fill = "gold") +
   coord_flip() +
-  labs(title = '"Hardest Working" Pre-Code Actors',
+  labs(title = '"Hardest Working" Pre-Code Actresses',
        y = "Number of Roles (1929-1934)",
        x = "",
-       caption = "Source: TMDB.com") +
+       caption = "Source: themoviedb.org") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
-  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
   theme(axis.line = element_line(color = text_color)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm"))
@@ -250,7 +253,7 @@ p <- pre_code_crew %>%
   labs(title = "Most Prolific Pre-Code Producers",
        y = "Number of Films (1929-1934)",
        x = "",
-       caption = "Source: TMDB.com") +
+       caption = "Source: themoviedb.org") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
   theme(axis.text = element_text(family = "sans",color = text_color)) +
@@ -267,10 +270,10 @@ p <- ranked_cast %>%
   mutate(name = fct_rev(as_factor(name))) %>%
   ggplot(aes(name,bankability)) + geom_col(fill = "gold") +
   coord_flip() +
-  labs(title = 'Most "Bankable" Pre-Code Actresses',
+  labs(title = 'Most "Bankable" Pre-Code Actoresses',
        y = "Appearances and Billing (1929-1934)",
        x = "",
-       caption = "Source: TMDB.com") +
+       caption = "Source: themoviedb.org") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
   theme(axis.text = element_text(family = "sans",color = text_color)) +
@@ -287,7 +290,7 @@ p <- ranked_cast %>%
   labs(title = 'Popularity Today vs. "Bankability" Then',
        y = "Bankability (Appearances and Billing)",
        x = "Relative Hits at TMDB",
-       caption = "Source: TMDB.com, Art Steinmetz") +
+       caption = "Source: themoviedb.org, Art Steinmetz") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
   theme(axis.text = element_text(family = "sans",color = text_color)) +
