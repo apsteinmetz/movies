@@ -1,17 +1,27 @@
 # get pre-code actors and movies
 library(tidyverse)
 library(TMDb)
-library(extrafont)
+# need to downgrade support package for extrafont
+# remotes::install_version("Rttf2pt1", version = "1.3.8")
+# library(extrafont)
+library(sysfonts)
+library(showtext)
 library(ggimage)
 library(magick)
 
 # proprietary to my system
 api_key <- Sys.getenv("TMDB_V3_API_KEY")
 
+
+sysfonts::font_add_google("Poiret One")
+showtext::showtext_auto()
+
 genres <- genres_movie_list(api_key)$genres %>%
   as_tibble() %>%
   mutate(across(.fns = as.factor)) %>%
-  rename(genre_id = id)
+  rename(genre_id = id,genre = name)
+save(genres,file="data/genres.rdata")
+
 min_runtime = 59
 
 # --------------------------------------------------
@@ -43,14 +53,13 @@ full_year <- function(target_year){
   return(result)
 }
 
-pre_code_movies_raw <- pre_code_years %>%
-  map(full_year) %>%
-  bind_rows()
+if (!file.exists("data/pre_code_movies_raw.rdata")){
+  pre_code_movies_raw <- pre_code_years %>%
+    map(full_year) %>%
+    bind_rows()
 
-save(pre_code_movies_raw,file="data/pre_code_movies_raw.rdata")
-# can't save nested genre lists
-#write_csv(pre_code_movies_raw,file="data/pre_code_movies_raw.csv")
-
+  save(pre_code_movies_raw,file="data/pre_code_movies_raw.rdata")
+}
 # get supplemental data including revenue, budget, running time
 # and imdb_id
 movie2 <- function(movie_id){
@@ -59,10 +68,11 @@ movie2 <- function(movie_id){
   return(movie(api_key,movie_id))
 }
 
-pre_code_movies_sup_raw <- pre_code_movies_raw$id %>%
+if (!file.exists("data/pre_code_movies_sup_raw.rdata")){
+  pre_code_movies_sup_raw <- pre_code_movies_raw$id %>%
   map(movie2)
 save(pre_code_movies_sup_raw,file = "data/pre_code_movies_sup_raw.rdata")
-
+}
 
 # --------------------------------------------------
 # get cast and crew as list columns
@@ -90,13 +100,14 @@ get_credits <- function(movie_id) {
   } else return(NULL)
 }
 
+if (!file.exists("data/pre_code_credits.rdata")){
+  pre_code_credits <- as.character(pre_code_movies$movie_id) %>%
+    map(get_credits) %>%
+    bind_rows()
 
-pre_code_credits <- as.character(pre_code_movies$movie_id) %>%
-  map(get_credits) %>%
-  bind_rows()
+  save(pre_code_credits,file="data/pre_code_credits.rdata")
 
-save(pre_code_credits,file="data/pre_code_credits.rdata")
-
+}
 # -----------------------------------------------
 # data wrangling
 # gender assumption from 1905 SS data based on 60% minimum
@@ -104,7 +115,6 @@ save(pre_code_credits,file="data/pre_code_credits.rdata")
 load("~/R Projects/movies/data/genders_1905.rdata")
 # allow for trans since TMDB does
 levels(genders_1905$gender) <- c("F","M","U","T")
-
 load(file="data/pre_code_credits.rdata")
 load(file="data/pre_code_movies_raw.rdata")
 load(file="data/pre_code_movies_sup_raw.rdata")
@@ -216,6 +226,27 @@ directors <- pre_code_crew %>%
   count(name) %>%
   arrange(desc(n))
 
+# genres
+movies_by_genre <- pre_code_movies %>%
+  select(movie_id,title,genre_ids,runtime) %>%
+  unnest(genre_ids) %>%
+  mutate(genre_id = as_factor(genre_ids)) %>%
+  mutate(short = (runtime <60)) %>%
+  left_join(genres,by="genre_id") %>%
+  select(movie_id,title,genre,short) %>%
+  filter(!str_detect(genre,"TV"))
+
+animated_movies <- movies_by_genre %>%
+  filter(genre == "Animation") %>%
+  transmute(movie_id,animated = TRUE)
+
+movies_by_genre <- movies_by_genre %>%
+  left_join(animated_movies) %>%
+  replace_na(list(animated=FALSE)) %>%
+  filter(genre != "Animation")
+
+ranked_genres <- movies_by_genre %>%
+  count(genre)
 
 # --------------------------------------------------
 # PLOTS
@@ -256,7 +287,7 @@ p <- pre_code_crew %>%
        caption = "Source: themoviedb.org") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
-  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
   theme(axis.line = element_line(color = text_color)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm"))
@@ -276,7 +307,7 @@ p <- ranked_cast %>%
        caption = "Source: themoviedb.org") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
-  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
   theme(axis.line = element_line(color = text_color)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm"))
@@ -293,10 +324,74 @@ p <- ranked_cast %>%
        caption = "Source: themoviedb.org, Art Steinmetz") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
-  theme(axis.text = element_text(family = "sans",color = text_color)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
   theme(axis.line = element_line(color = text_color)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm"))
 ggimage::ggbackground(p, "img/deco background.jpg")
 
+# Genres
+p <- movies_by_genre %>%
+  filter(short == FALSE) %>%
+  count(genre) %>%
+  arrange(n) %>%
+  mutate(genre = as_factor(as.character(genre))) %>%
+  ggplot(aes(genre,n)) + geom_col(fill = text_color) +
+  labs(title = 'Most Released Feature Genres',
+       subtitle = "(Genres Not Mutually Exclusive)",
+       y = "Count",
+       x = "Genre",
+       caption = "Source: themoviedb.org") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm")) +
+  coord_flip()
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+# live-action shorts
+p <- movies_by_genre %>%
+  filter(short == TRUE) %>%
+  filter(animated == FALSE) %>%
+  count(genre) %>%
+  arrange(n) %>%
+  mutate(genre = as_factor(as.character(genre))) %>%
+  ggplot(aes(genre,n)) + geom_col(fill = text_color) +
+  labs(title = 'Most Released Live-Action Shorts Genres',
+       subtitle = "(Genres Not Mutually Exclusive)",
+       y = "Count",
+       x = "Genre",
+       caption = "Source: themoviedb.org") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm")) +
+  coord_flip()
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+# animated shorts
+p <- movies_by_genre %>%
+  filter(short == TRUE) %>%
+  filter(animated == TRUE) %>%
+  count(genre) %>%
+  arrange(n) %>%
+  mutate(genre = as_factor(as.character(genre))) %>%
+  ggplot(aes(genre,n)) + geom_col(fill = text_color) +
+  labs(title = 'Most Released Animated Shorts Genres',
+       subtitle = "(Genres Not Mutually Exclusive)",
+       y = "Count",
+       x = "Genre",
+       caption = "Source: themoviedb.org") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm")) +
+  coord_flip()
+ggimage::ggbackground(p, "img/deco background.jpg")
 
