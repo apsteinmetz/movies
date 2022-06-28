@@ -18,12 +18,16 @@ showtext::showtext_auto()
 
 genres <- genres_movie_list(api_key)$genres %>%
   as_tibble() %>%
+  bind_rows(tibble(id=0,name="None")) %>%
   mutate(across(.fns = as.factor)) %>%
-  rename(genre_id = id,genre = name)
+  rename(genre_id = id,genre = name) %>%
+  {.}
 save(genres,file="data/genres.rdata")
 
 min_runtime = 59
 
+LOCALES = factor(c("English","NonEnglish","Global"))
+LOCALE = "Global"
 # --------------------------------------------------
 # Get all movies for a year
 pre_code_years <- as.character(1929:1934)
@@ -103,7 +107,8 @@ get_credits <- function(movie_id) {
 if (!file.exists("data/pre_code_credits.rdata")){
   pre_code_credits <- as.character(pre_code_movies$movie_id) %>%
     map(get_credits) %>%
-    bind_rows()
+    bind_rows() %>%
+    mutate(movie_id %>% as_factor(movie_id))
 
   save(pre_code_credits,file="data/pre_code_credits.rdata")
 
@@ -135,12 +140,24 @@ pre_code_movies <- pre_code_movies_raw %>%
   rename(movie_id = id) %>%
   mutate(movie_id = as_factor(movie_id)) %>%
   mutate(original_language =as.factor(original_language)) %>%
-  filter(original_language == "en") %>%
   mutate(release_year = as.numeric(release_year)) %>%
   mutate(release_date = as.Date(release_date))
 
-# add supplemental data
+# fix empty genre_id rows
+for (n in 1:nrow(pre_code_movies)){
+  if(length(pre_code_movies$genre_ids[[n]])==0) pre_code_movies$genre_ids[[n]] <- 0
+}
 
+# Filter for language
+
+movies_by_language <- function(language){
+  switch(EXPR=language,
+                          English = filter(pre_code_movies,original_language == "en"),
+                          NonEnglish = filter(pre_code_movies,original_language != "en"),
+                          Global = pre_code_movies)
+}
+
+# add supplemental data
 pre_code_movies_sup <- lapply(pre_code_movies_sup_raw,function(x){
   data.frame(movie_id = x[['id']],
              budget = x[['budget']],
@@ -153,10 +170,6 @@ pre_code_movies_sup <- lapply(pre_code_movies_sup_raw,function(x){
 
 pre_code_movies <- pre_code_movies %>%
   left_join(pre_code_movies_sup,by="movie_id")
-
-
-
-
 
 pre_code_cast <- pre_code_credits %>%
   unnest(cols = "cast") %>%
@@ -174,7 +187,7 @@ pre_code_cast <- pre_code_credits %>%
          .before = "gender.x") %>%
   select(-gender.x,-gender.y,-first) %>%
   # limit to actors in English-language films
-  inner_join(pre_code_movies) %>%
+  inner_join(movies_by_language(LOCALE)) %>%
   filter(runtime > min_runtime)
 
 # scale billing order to count
@@ -217,7 +230,7 @@ pre_code_crew <- pre_code_credits %>%
          .before = "gender.x") %>%
   select(-gender.x,-gender.y,-first) %>%
   # limit to English-language films
-  inner_join(pre_code_movies) %>%
+  inner_join(movies_by_language(LOCALE)) %>%
   filter(runtime > min_runtime) %>%
   {.}
 
@@ -227,14 +240,15 @@ directors <- pre_code_crew %>%
   arrange(desc(n))
 
 # genres
-movies_by_genre <- pre_code_movies %>%
-  select(movie_id,title,genre_ids,runtime) %>%
+movies_by_genre <- movies_by_language(LOCALE) %>%
+  select(movie_id,title,genre_ids,runtime,original_language) %>%
   unnest(genre_ids) %>%
-  mutate(genre_id = as_factor(genre_ids)) %>%
-  mutate(short = (runtime <60)) %>%
-  left_join(genres,by="genre_id") %>%
-  select(movie_id,title,genre,short) %>%
-  filter(!str_detect(genre,"TV"))
+   mutate(genre_id = as_factor(genre_ids)) %>%
+   mutate(short = (runtime <60)) %>%
+   left_join(genres,by="genre_id") %>%
+   select(movie_id,title,genre,short,original_language) %>%
+   filter(!str_detect(genre,"TV")) %>%
+  {.}
 
 animated_movies <- movies_by_genre %>%
   filter(genre == "Animation") %>%
@@ -337,7 +351,7 @@ p <- movies_by_genre %>%
   arrange(n) %>%
   mutate(genre = as_factor(as.character(genre))) %>%
   ggplot(aes(genre,n)) + geom_col(fill = text_color) +
-  labs(title = 'Most Released Feature Genres',
+  labs(title = 'Pre-Code Feature Genres',
        subtitle = "(Genres Not Mutually Exclusive)",
        y = "Count",
        x = "Genre",
@@ -359,7 +373,7 @@ p <- movies_by_genre %>%
   arrange(n) %>%
   mutate(genre = as_factor(as.character(genre))) %>%
   ggplot(aes(genre,n)) + geom_col(fill = text_color) +
-  labs(title = 'Most Released Live-Action Shorts Genres',
+  labs(title = 'Pre-Code Live-Action Shorts Genres',
        subtitle = "(Genres Not Mutually Exclusive)",
        y = "Count",
        x = "Genre",
@@ -381,7 +395,7 @@ p <- movies_by_genre %>%
   arrange(n) %>%
   mutate(genre = as_factor(as.character(genre))) %>%
   ggplot(aes(genre,n)) + geom_col(fill = text_color) +
-  labs(title = 'Most Released Animated Shorts Genres',
+  labs(title = 'Pre-Code Animated Shorts Genres',
        subtitle = "(Genres Not Mutually Exclusive)",
        y = "Count",
        x = "Genre",
