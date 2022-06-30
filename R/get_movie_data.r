@@ -16,15 +16,17 @@ api_key <- Sys.getenv("TMDB_V3_API_KEY")
 sysfonts::font_add_google("Poiret One")
 showtext::showtext_auto()
 
-genres <- genres_movie_list(api_key)$genres %>%
-  as_tibble() %>%
-  bind_rows(tibble(id=0,name="None")) %>%
-  mutate(across(.fns = as.factor)) %>%
-  rename(genre_id = id,genre = name) %>%
-  {.}
-save(genres,file="data/genres.rdata")
-
+if (!file.exists("data/genres.rdata")) {
+  genres <- genres_movie_list(api_key)$genres %>%
+    as_tibble() %>%
+    bind_rows(tibble(id = 0, name = "Unknown")) %>%
+    mutate(across(.fns = as.factor)) %>%
+    rename(genre_id = id, genre = name) %>%
+    {.}
+  save(genres, file = "data/genres.rdata")
+}
 min_runtime = 59
+
 
 LOCALES = factor(c("English","NonEnglish","Global"))
 LOCALE = "Global"
@@ -123,6 +125,10 @@ levels(genders_1905$gender) <- c("F","M","U","T")
 load(file="data/pre_code_credits.rdata")
 load(file="data/pre_code_movies_raw.rdata")
 load(file="data/pre_code_movies_sup_raw.rdata")
+load(file="data/genres.rdata")
+iso_langauges <- read_csv("data/iso_langauges.csv",show_col_types = FALSE) %>%
+  filter(iso_2_letter != "") %>%
+  transmute(original_language = iso_2_letter,language_name = english_name)
 
 pre_code_movies <- pre_code_movies_raw %>%
   select(release_year,
@@ -140,22 +146,11 @@ pre_code_movies <- pre_code_movies_raw %>%
   rename(movie_id = id) %>%
   mutate(movie_id = as_factor(movie_id)) %>%
   mutate(original_language =as.factor(original_language)) %>%
+  mutate(english =(original_language == "en")) %>%
+  mutate(language = as_factor(if_else(english,"English","NonEnglish"))) %>%
   mutate(release_year = as.numeric(release_year)) %>%
-  mutate(release_date = as.Date(release_date))
-
-# fix empty genre_id rows
-for (n in 1:nrow(pre_code_movies)){
-  if(length(pre_code_movies$genre_ids[[n]])==0) pre_code_movies$genre_ids[[n]] <- 0
-}
-
-# Filter for language
-
-movies_by_language <- function(language){
-  switch(EXPR=language,
-                          English = filter(pre_code_movies,original_language == "en"),
-                          NonEnglish = filter(pre_code_movies,original_language != "en"),
-                          Global = pre_code_movies)
-}
+  mutate(release_date = as.Date(release_date)) %>%
+  left_join(iso_langauges,by="original_language")
 
 # add supplemental data
 pre_code_movies_sup <- lapply(pre_code_movies_sup_raw,function(x){
@@ -170,6 +165,20 @@ pre_code_movies_sup <- lapply(pre_code_movies_sup_raw,function(x){
 
 pre_code_movies <- pre_code_movies %>%
   left_join(pre_code_movies_sup,by="movie_id")
+
+# more clean up
+# fix empty genre_id rows
+for (n in 1:nrow(pre_code_movies)){
+  if(length(pre_code_movies$genre_ids[[n]])==0) pre_code_movies$genre_ids[[n]] <- 0
+}
+
+# Filter function for language
+movies_by_language <- function(language){
+  switch(EXPR=language,
+         English = filter(pre_code_movies,original_language == "en"),
+         NonEnglish = filter(pre_code_movies,original_language != "en"),
+         Global = pre_code_movies)
+}
 
 pre_code_cast <- pre_code_credits %>%
   unnest(cols = "cast") %>%
@@ -220,8 +229,8 @@ pre_code_crew <- pre_code_credits %>%
   mutate(person_id = as_factor(person_id)) %>%
   mutate(movie_id = as_factor(movie_id)) %>%
   rename(person_popularity = popularity) %>%
-  mutate(gender = as.character(gender)) %>%
-  mutate(gender = fct_recode(gender,F= '1',M = '2',U = '0',T = "3")) %>%
+  mutate(gender = fct_recode(gender,F= '1',M = '2',U = '0')) %>%
+  mutate(gender = fct_expand(gender,"T")) %>%
   # guess unknown genders
   mutate(first = word(name)) %>%
   left_join(genders_1905,by="first") %>%
@@ -241,14 +250,22 @@ directors <- pre_code_crew %>%
 
 # genres
 movies_by_genre <- movies_by_language(LOCALE) %>%
-  select(movie_id,title,genre_ids,runtime,original_language) %>%
+  select(movie_id,title,genre_ids,runtime,english,language) %>%
   unnest(genre_ids) %>%
    mutate(genre_id = as_factor(genre_ids)) %>%
-   mutate(short = (runtime <60)) %>%
+   mutate(short = (runtime < 60)) %>%
    left_join(genres,by="genre_id") %>%
-   select(movie_id,title,genre,short,original_language) %>%
+   select(movie_id,title,genre,short,english,language) %>%
    filter(!str_detect(genre,"TV")) %>%
   {.}
+
+
+ranked_genres <- movies_by_genre %>%
+  count(genre) %>% arrange(n) %>%
+  mutate(genre = as_factor(as.character(genre)))
+
+
+movies_by_genre$genre <- fct_relevel(movies_by_genre$genre,levels(ranked_genres$genre))
 
 animated_movies <- movies_by_genre %>%
   filter(genre == "Animation") %>%
@@ -258,9 +275,6 @@ movies_by_genre <- movies_by_genre %>%
   left_join(animated_movies) %>%
   replace_na(list(animated=FALSE)) %>%
   filter(genre != "Animation")
-
-ranked_genres <- movies_by_genre %>%
-  count(genre)
 
 # --------------------------------------------------
 # PLOTS
@@ -347,16 +361,17 @@ ggimage::ggbackground(p, "img/deco background.jpg")
 # Genres
 p <- movies_by_genre %>%
   filter(short == FALSE) %>%
-  count(genre) %>%
   arrange(n) %>%
-  mutate(genre = as_factor(as.character(genre))) %>%
-  ggplot(aes(genre,n)) + geom_col(fill = text_color) +
+  group_by(genre,language) %>%
+  summarise(n = n()) %>%
+  mutate(genre = fct_reorder(genre,n)) %>%
+  ggplot(aes(genre,n,fill = language)) + geom_col() +
   labs(title = 'Pre-Code Feature Genres',
        subtitle = "(Genres Not Mutually Exclusive)",
        y = "Count",
        x = "Genre",
        caption = "Source: themoviedb.org") +
-
+  scale_fill_discrete(type = c("brown","gold")) +
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
   theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
   theme(axis.line = element_line(color = text_color)) +
@@ -399,6 +414,28 @@ p <- movies_by_genre %>%
        subtitle = "(Genres Not Mutually Exclusive)",
        y = "Count",
        x = "Genre",
+       caption = "Source: themoviedb.org") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm")) +
+  coord_flip()
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+# languages
+p <- movies_by_language("NonEnglish") %>%
+  filter(runtime > min_runtime) %>%
+  count(language_name) %>%
+  arrange(n) %>%
+  slice_max(order_by=n,n=10) %>%
+  mutate(language_name = fct_reorder(language_name,n)) %>%
+  ggplot(aes(language_name,n)) + geom_col(fill = text_color) +
+  labs(title = 'Top 10 Feature Languages\nin the Pre-Code Era',
+       subtitle = "(English excluded)",
+       y = "Count",
+       x = "",
        caption = "Source: themoviedb.org") +
 
   theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
