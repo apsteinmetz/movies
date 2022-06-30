@@ -14,6 +14,8 @@ api_key <- Sys.getenv("TMDB_V3_API_KEY")
 
 
 sysfonts::font_add_google("Poiret One")
+sysfonts::font_add_google("Righteous")
+sysfonts::font_add_google("Limelight")
 showtext::showtext_auto()
 
 if (!file.exists("data/genres.rdata")) {
@@ -128,7 +130,8 @@ load(file="data/pre_code_movies_sup_raw.rdata")
 load(file="data/genres.rdata")
 iso_langauges <- read_csv("data/iso_langauges.csv",show_col_types = FALSE) %>%
   filter(iso_2_letter != "") %>%
-  transmute(original_language = iso_2_letter,language_name = english_name)
+  transmute(original_language = iso_2_letter,language_name = english_name) %>%
+  unique()
 
 pre_code_movies <- pre_code_movies_raw %>%
   select(release_year,
@@ -369,11 +372,11 @@ p <- movies_by_genre %>%
   labs(title = 'Pre-Code Feature Genres',
        subtitle = "(Genres Not Mutually Exclusive)",
        y = "Count",
-       x = "Genre",
+       x = "",
        caption = "Source: themoviedb.org") +
   scale_fill_discrete(type = c("brown","gold")) +
-  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
-  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
+  theme(text = element_text(family = "Limelight",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Righteous",color = text_color)) +
   theme(axis.line = element_line(color = text_color)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm")) +
@@ -437,9 +440,10 @@ p <- movies_by_language("NonEnglish") %>%
        y = "Count",
        x = "",
        caption = "Source: themoviedb.org") +
+  scale_y_continuous(breaks = seq(0,500,by = 100)) +
 
-  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
-  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
+  theme(text = element_text(family = "Limelight",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Righteous",color = text_color)) +
   theme(axis.line = element_line(color = text_color)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm")) +
