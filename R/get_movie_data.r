@@ -253,12 +253,12 @@ directors <- pre_code_crew %>%
 
 # genres
 movies_by_genre <- movies_by_language(LOCALE) %>%
-  select(movie_id,title,genre_ids,runtime,english,language) %>%
+  select(movie_id,title,genre_ids,runtime,english,language,vote_average,vote_count) %>%
   unnest(genre_ids) %>%
    mutate(genre_id = as_factor(genre_ids)) %>%
    mutate(short = (runtime < 60)) %>%
    left_join(genres,by="genre_id") %>%
-   select(movie_id,title,genre,short,english,language) %>%
+   select(movie_id,title,genre,short,english,language,vote_average,vote_count) %>%
    filter(!str_detect(genre,"TV")) %>%
   {.}
 
@@ -448,5 +448,101 @@ p <- movies_by_language("NonEnglish") %>%
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   theme(plot.margin = margin(2,.8,2,.8, "cm")) +
   coord_flip()
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+#popularity today
+p <- ranked_cast %>%
+  #  filter(bankability > 20,person_popularity > 2) %>%
+  ggplot(aes(person_popularity,bankability)) + geom_point(color = text_color) +
+  geom_text(aes(label=ifelse(bankability>55,name,'')),hjust=-.1,vjust=0,color = text_color) +
+  geom_text(aes(label=ifelse(person_popularity>16,name,'')),hjust=.7,vjust=-0.6,color = text_color) +
+  labs(title = 'Popularity Today vs. "Bankability" Then',
+       y = "Bankability (Appearances and Billing)",
+       x = "Relative Hits at TMDB",
+       caption = "Source: themoviedb.org, Art Steinmetz") +
+
+  theme(text = element_text(family = "Poiret One",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Poiret One",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2,.8,2,.8, "cm"))
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+
+movies_by_language("English") %>%
+  filter(vote_count > 5) %>%
+  pull(vote_average) %>%
+  mean()
+
+# Distribution of Ratings
+p <- movies_by_language("English") %>%
+  filter(vote_count > 5) %>%
+  filter(vote_average > 0) %>%
+  ggplot(aes(vote_average)) +
+  geom_histogram(fill = text_color,color="black", binwidth = 0.5) +
+  scale_x_continuous(breaks = 0:10) +
+  labs(title = 'Pre-Code Movie Ratings at TMDB',
+       subtitle = "Films With More Than Five Raters",
+       y = "Number of Movies",
+       x = "Average Rating",
+       caption = "Source: themoviedb.org"
+  ) +
+
+  theme(text = element_text(
+    family = "Poiret One",
+    color = text_color,
+    size = 20
+  )) +
+  theme(text = element_text(family = "Limelight",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Righteous",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2, .8, 2, .8, "cm"))
+
+ggimage::ggbackground(p, "img/deco background.jpg")
+
+
+# Top-Rated Movies
+temp <- movies_by_language("English") %>%
+  filter(vote_count > 50) %>%
+  filter(vote_average > 0) %>%
+  slice_max(order_by = vote_average,n=10) %>%
+  unnest(genre_ids) %>%
+  mutate(genre_ids = as_factor(genre_ids)) %>%
+  rename(genre_id = genre_ids) %>%
+  left_join(genres) %>%
+  select(movie_id,title,genre,vote_average,vote_count
+         ) %>%
+  group_by(movie_id,title,vote_average,vote_count) %>%
+  summarise(genres = toString(genre)
+            ) %>%
+  left_join(filter(pre_code_cast,order<2)) %>%
+  group_by(title,vote_average,vote_count,genres) %>%
+  summarise(Stars = toString(name)
+  ) %>%
+  arrange(desc(vote_average)) %>%
+  write_csv(file="data/top_films.csv") %>%
+  {.}
+
+p <- movies_by_language("English") %>%
+  filter(vote_count > 5) %>%
+  filter(vote_average > 0) %>%
+  ggplot(aes(vote_average)) +
+  geom_histogram(fill = text_color,color="black", binwidth = 0.5) +
+  scale_x_continuous(breaks = 0:10) +
+  labs(title = 'Pre-Code Movie Ratings at TMDB',
+       subtitle = "Films With More Than Five Raters",
+       y = "Number of Movies",
+       x = "Average Rating",
+       caption = "Source: themoviedb.org"
+  ) +
+  theme(text = element_text(family = "Limelight",color = text_color,size = 20)) +
+  theme(axis.text = element_text(family = "Righteous",color = text_color)) +
+  theme(axis.line = element_line(color = text_color)) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  theme(plot.margin = margin(2, .8, 2, .8, "cm"))
+
 ggimage::ggbackground(p, "img/deco background.jpg")
 
